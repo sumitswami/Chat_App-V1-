@@ -46,15 +46,24 @@ import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.StorageTask;
 import com.google.firebase.storage.UploadTask;
 
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.spec.SecretKeySpec;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
-    private static final int RC_PHOTO_PICKER =  2;
+    public static final int RC_PHOTO_PICKER =  2;
     public static  final int RC_SIGN_IN = 1;
 
     private ListView mMessageListView;
@@ -74,6 +83,13 @@ public class MainActivity extends AppCompatActivity {
 
     private DatabaseReference mMessagesDatabaseReference ;
     private StorageReference mStorageReference;
+
+    //AES Encryption key
+    private byte encryptionkey[] = {9, 115, 51, 86, 105, 4, -31, -23, -68, 88, 17, 20, 3, -105, 119, -53};
+
+    //Cryptography (AES)
+    private Cipher cipher, decipher;
+    private SecretKeySpec SecretSpecKey;
 
 
 
@@ -101,6 +117,16 @@ public class MainActivity extends AppCompatActivity {
         mMessageEditText = (EditText) findViewById(R.id.messageEditText);
         mSendButton = (Button) findViewById(R.id.sendButton);
 
+        try {
+            cipher = Cipher.getInstance("AES");
+            decipher = Cipher.getInstance("AES");
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        }
+
+        SecretSpecKey  = new SecretKeySpec(encryptionkey,"AES");
 
 
         // Initialize message ListView and its adapter
@@ -152,8 +178,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 // Send button sends a message and clears the EditText
-                        friendlymessage mfriendlyMessage = new friendlymessage(mMessageEditText.getText().toString(), mUsername, null);
-                        mMessagesDatabaseReference.push().setValue(mfriendlyMessage);
+                friendlymessage mfriendlyMessage = null;
+                try {
+                    mfriendlyMessage = new friendlymessage(AESEncryptionMethod(mMessageEditText.getText().toString()), AESEncryptionMethod(mUsername), null);
+                } catch (UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                }
+                mMessagesDatabaseReference.push().setValue(mfriendlyMessage);
 
                         // Clear input box
                         mMessageEditText.setText("");
@@ -161,6 +192,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         );
+
 
 
         mAuthStateListener = new FirebaseAuth.AuthStateListener() {
@@ -188,7 +220,34 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-        @Override
+    private String AESEncryptionMethod(String message) throws UnsupportedEncodingException {
+        byte[] messageByte = message.getBytes();
+        byte[] encryptedByte = new byte[messageByte.length];
+        String encryptedMessage = null;
+
+        try {
+            cipher.init(Cipher.ENCRYPT_MODE, SecretSpecKey);
+            encryptedByte = cipher.doFinal(messageByte);
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            encryptedMessage = new String(encryptedByte, "ISO-8859-1");
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
+
+        return encryptedMessage;
+    }
+
+
+
+    @Override
         public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.main_menu, menu);
@@ -225,14 +284,14 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    private void onSignedInInitialize( String username) {
+    public void onSignedInInitialize( String username) {
           //setting the entered username equals to the username in friendlymessage class
           mUsername = username;
           // data is read and called from database only if user is signed in therefore its present here in this method
           attachedDatabaseReadListener();
     }
 
-    private void onSignedOutCleanup() {
+    public void onSignedOutCleanup() {
         //this method unsets the username , detaches the listener , clears the UI and clears the messages from screen
         mUsername = ANONYMOUS;
         mMessageAdapter.clear();
@@ -241,7 +300,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     //method to read data from firebase database since rules allow only auth. users to read therefore this makes no sense in oncreate method
-    private  void attachedDatabaseReadListener () {
+    public  void attachedDatabaseReadListener () {
         if (mChildEventListener == null) { //create and attach listener only if its null
 
             mChildEventListener = new ChildEventListener() {
@@ -278,16 +337,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+    public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == RC_SIGN_IN){
-            if(resultCode == RESULT_OK) {
-              Toast.makeText(this,"Signed in Successfully",Toast.LENGTH_SHORT).show();
-            }
-            else if ( resultCode == RESULT_CANCELED) {
-                Toast.makeText(this,"Sign in Cancelled",Toast.LENGTH_SHORT).show();
+        if (requestCode == RC_SIGN_IN) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "Signed in Successfully", Toast.LENGTH_SHORT).show();
+            } else if (resultCode == RESULT_CANCELED) {
+                Toast.makeText(this, "Sign in Cancelled", Toast.LENGTH_SHORT).show();
                 finish();
             }
+        }
             else if (requestCode == RC_PHOTO_PICKER && resultCode == RESULT_OK) {
                 Uri selectedImageUri = data.getData();
                 final StorageReference photoref =
@@ -304,18 +363,18 @@ public class MainActivity extends AppCompatActivity {
                                         Uri Downloadurl = uri;
                                         friendlymessage friendlyMessage =
                                                 new friendlymessage(null,mUsername,Downloadurl.toString());
-
+                                  mMessagesDatabaseReference.push().setValue(friendlyMessage);
                                     }});
                             }});
 
             }
-        } }
+        }
 
 
 
 
        //detaches the listener
-      private void detachDatabaseReadListener() {
+      public void detachDatabaseReadListener() {
          if (mChildEventListener != null) { // if statement because we need to detach child event listener only once
           mMessagesDatabaseReference.removeEventListener(mChildEventListener);
           mChildEventListener = null;   //setting eventlistener to null after detaching
